@@ -1,0 +1,5 @@
+# Put the dockerfile for using TensorRT for the inference
+# and use cuda for rendering the Custom kernels for converting
+#  the RGBD image into  a 3d detection system.
+
+# FROM ubuntu 
