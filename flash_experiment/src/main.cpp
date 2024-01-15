@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
 
 
 
-        int a = readFile("/tmp/testData.txt", 10, 5000000);
+        int a = readFile("/media/cesarruiz/UBUNTU 22_0/testData.txt", 10, 5000000);
         std::cout << "Time taken: " << a << " ms" << std::endl;
 
         // createWeights();
