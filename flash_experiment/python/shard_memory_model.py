@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import argparse
-import flash_experiment.python.benchmark as benchmark
+
 from safetensors import safe_open
+
 from safetensors.torch import save_file
 from typing import List
 import os
@@ -44,26 +45,29 @@ class DenseModel(nn.Module):
     
 
 class ShardedModel(nn.Module):
-    def __init__(self, weight_path: str):
+    def __init__(self, weight_path: str, model: torch.nn.Module):
         super(ShardedModel, self).__init__()
         self.weight_path = weight_path
-
+        self.model_layers = model.children()
 
     def forward(self, x):
-        #Gradients are not saved  for reducing memory
+        # Gradients are not saved  for reducing memory
         with torch.no_grad():
             temporal_output_tensor = x
             shard_id = 0
             for path in os.listdir(self.weight_path):
-                with safe_open(os.path.join(self.weight_path, f"shard_{shard_id}.pt"), framework="pt", device="cpu") as f:
-                    sharded_module = torch.load(f)
-                    temporal_output_tensor = sharded_module(temporal_output_tensor)
+                with safe_open(os.path.join(self.weight_path, f"shard_{shard_id}.safetensors"), framework="pt", device="cpu") as f:
+                    for layer_name in f.keys():_
+                        f.get_tensor(layer_name)
+                        temporal_output_tensor = f.get_tensor(layer_name)
                 del sharded_module
                 
                 shard_id += 1
 
 
         return temporal_output_tensor
+    
+
 
 
 
@@ -84,21 +88,23 @@ def check_contraint(runner_function, memory_constraint: int):
         print(f"Memory constraint satisfied")
 
 
-def save_model_weights(model_dir: str, model: nn.Module, shards):
-    layers = list(model.children())
-    layers_per_shard = int(len(layers) / shards)
-    sharded_layers = {
-        f"shard{i}": nn.ModuleList(layers[i * layers_per_shard -1:  i * layers_per_shard ] )
-        for i in range(1,shards+ 1 )
-    }
+def save_model_weights(model_dir: str, model: nn.Module, shards: int):
+    state_dict = model.state_dict()
+    total_params = len(state_dict)
+    layers_per_shard = total_params // shards
 
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
 
-    for shard_id, shard in sharded_layers.items():
-        save_file(os.path.join(model_dir, f"shard_{shard_id}.pt"), shard, framework="pt")
+    for shard_id in range(shards):
+        # Starting and ending indices for slicing the state_dict
+        start = shard_id * layers_per_shard
+        end = start + layers_per_shard if shard_id < shards - 1 else total_params
 
-    
+        # Slicing the state_dict to create a shard
+        shard = {k: state_dict[k] for k in list(state_dict)[start:end]}
+        save_file(filename=os.path.join(model_dir, f"shard_{shard_id}.safetensors"), tensors=shard)
+
 
 def get_available_storage_devices():
     path = os.path.realpath(path)
@@ -147,5 +153,12 @@ if __name__ == "__main__":
     argparser.add_argument('--memory_constraint', type=int, default=5)
     args = argparser.parse_args()
 
-    model = DenseModel(input_size=args.input_size, hidden_layers=args.hidden_layers, layer_width=args)
-    
+    model = DenseModel(input_size=args.input_size,output_size= args.output_size, hidden_layers=args.hidden_layers, layer_width = 100)
+    save_model_weights(model_dir="/home/cesar/models", model=model, shards=args.num_shards)
+    model_path = "/home/cesar/models"
+
+    sharded_model = ShardedModel(model_path)
+
+    for i in range(100):
+        output = sharded_model(torch.randn(1, args.input_size))
+        print(output.shape)
